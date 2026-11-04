@@ -13,13 +13,21 @@ const config = [
       UV: ["./src/index.ts"],
     },
     mode: "production",
+    devtool: false,
     output: {
       path: resolvePath("dist/umd"),
       publicPath: "auto",
       libraryTarget: "umd",
       library: "UV",
       umdNamedDefine: true,
-      chunkFilename: "[name].[contenthash].js",
+
+      chunkFilename: "[id].js",
+    },
+    optimization: {
+      mangleExports: "size",
+    },
+    performance: {
+      hints: false,
     },
     resolve: {
       extensions: [".ts", ".tsx", ".js"],
@@ -32,11 +40,11 @@ const config = [
       rules: [
         {
           test: /\.ts$/,
-          use: [{ loader: "ts-loader" }],
+          use: [{ loader: "ts-loader", options: { configFile: "tsconfig.webpack.json" } }],
         },
         {
           test: /\.tsx$/,
-          use: [{ loader: "ts-loader" }],
+          use: [{ loader: "ts-loader", options: { configFile: "tsconfig.webpack.json" } }],
         },
         {
           test: /\.css$/i,
@@ -132,6 +140,19 @@ const config = [
           {
             from: resolvePath("./src/uv.html"),
             to: resolvePath("./dist"),
+            transform(content) {
+              return Promise.resolve(
+                Buffer.from(
+                  content
+                    .toString()
+                    .replace(
+                      "<%= htmlWebpackPlugin.tags.headTags %>",
+                      '<script type="text/javascript" src="umd/UV.js"></script>'
+                    ),
+                  "utf8"
+                )
+              );
+            },
           },
         ],
       }),
@@ -140,11 +161,11 @@ const config = [
 ];
 
 if (process.env.NODE_WEBPACK_LIBRARY_PATH) {
-  config.output.path = resolvePath(process.env.NODE_WEBPACK_LIBRARY_PATH);
+  config[0].output.path = resolvePath(process.env.NODE_WEBPACK_LIBRARY_PATH);
 }
 
 if (process.env.NODE_WEBPACK_LIBRARY_TARGET) {
-  config.output.libraryTarget = process.env.NODE_WEBPACK_LIBRARY_TARGET;
+  config[0].output.libraryTarget = process.env.NODE_WEBPACK_LIBRARY_TARGET;
 }
 
 module.exports = config;

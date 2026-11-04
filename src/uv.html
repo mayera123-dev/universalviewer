@@ -9,14 +9,19 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
+    <%= htmlWebpackPlugin.tags.headTags %>
     <link rel="icon" href="favicon.ico" />
     <link rel="stylesheet" type="text/css" href="uv.css" />
-    <script type="text/javascript" src="umd/UV.js"></script>
     <style>
       body {
         margin: 0;
         padding: 0;
         overflow: hidden;
+      }
+
+      #uv {
+        width: 100vw;
+        height: 100vh;
       }
     </style>
   </head>
@@ -31,30 +36,154 @@
           embedded: true,
         });
 
-        uv = UV.init("uv", data);
+        const uv = UV.init("uv", data);
+
+        function getAllowedConfigHosts() {
+          const defaults = [window.location.hostname, "universalviewer.io"];
+          const configured = Array.isArray(window.UV_ALLOWED_CONFIG_HOSTS)
+            ? window.UV_ALLOWED_CONFIG_HOSTS
+            : [];
+
+          return defaults.concat(configured).map(function (host) {
+            return String(host || "").toLowerCase();
+          });
+        }
+
+        function isAllowedConfigUrl(url) {
+          try {
+            const parsedUrl = new URL(url, window.location.href);
+            const host = parsedUrl.hostname.toLowerCase();
+            const allowedHosts = getAllowedConfigHosts();
+
+            if (
+              !allowedHosts.includes(host) &&
+              !allowedHosts.some(function (allowedHost) {
+                return !!allowedHost && host.endsWith("." + allowedHost);
+              })
+            ) {
+              return false;
+            }
+
+            if (parsedUrl.protocol === "https:") {
+              return true;
+            }
+
+            // allow http only when current page is also served via http
+            return (
+              parsedUrl.protocol === "http:" && window.location.protocol === "http:"
+            );
+          } catch {
+            return false;
+          }
+        }
+
+        function isValidUvConfig(config) {
+          if (!config || typeof config !== "object" || Array.isArray(config)) {
+            return false;
+          }
+
+          const objectKeys = ["options", "modules", "localisation", "content"];
+
+          return objectKeys.every(function (key) {
+            const value = config[key];
+            return (
+              value === undefined ||
+              (typeof value === "object" && value !== null && !Array.isArray(value))
+            );
+          });
+        }
+
+        function wait(ms) {
+          return new Promise(function (resolve) {
+            setTimeout(resolve, ms);
+          });
+        }
+
+        function fetchConfigWithTimeout(url, timeoutMs) {
+          const canAbort = typeof AbortController !== "undefined";
+          const controller = canAbort ? new AbortController() : null;
+
+          const timeoutId = setTimeout(function() {
+            if (controller) {
+              controller.abort();
+            }
+          }, timeoutMs);
+
+          const fetchOptions = controller ? { signal: controller.signal } : undefined;
+
+          return fetch(url, fetchOptions)
+            .then(function (response) {
+              if (!response.ok) {
+                throw new Error("Failed to load config: " + response.status);
+              }
+
+              return response.json();
+            })
+            .finally(function () {
+              clearTimeout(timeoutId);
+            });
+        }
+
+        function fetchConfigWithRetry(url, timeoutMs, maxAttempts) {
+          var attempt = 0;
+
+          function next() {
+            attempt++;
+
+            return fetchConfigWithTimeout(url, timeoutMs)
+              .then(function (config) {
+                if (!isValidUvConfig(config)) {
+                  throw new Error("Invalid UV config structure");
+                }
+
+                return config;
+              })
+              .catch(function (error) {
+                if (attempt >= maxAttempts) {
+                  throw error;
+                }
+
+                var delayMs = Math.min(500 * Math.pow(2, attempt - 1), 2000);
+                delayMs += Math.floor(Math.random() * 200);
+
+                return wait(delayMs).then(next);
+              });
+          }
+
+          return next();
+        }
 
 
         const configUrl = urlAdapter.get('config');
-        if (configUrl) {
-          uv.on("configure", function({ config, cb }) {
+        if (configUrl && isAllowedConfigUrl(configUrl)) {
+          uv.on("configure", function({ cb }) {
             cb(
-              new Promise(function (resolve) {
-                fetch(configUrl).then(function (response) {
-                  resolve(response.json());
-                });
+              fetchConfigWithRetry(configUrl, 10000, 3).catch(function (error) {
+                if (typeof console !== "undefined" && console.warn) {
+                  console.warn("UV embed config load failed", error);
+                }
+                return null;
               })
             );
-          })
+          });
+        } else if (configUrl) {
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn("UV embed ignored unsupported config URL", configUrl);
+          }
         }
 
         var $UV = document.getElementById("uv");
 
         function resize() {
-          $UV.setAttribute("style", "width:" + window.innerWidth + "px");
-          $UV.setAttribute("style", "height:" + window.innerHeight + "px");
+          if (!$UV) {
+            return;
+          }
+
+          $UV.style.width = window.innerWidth + "px";
+          $UV.style.height = window.innerHeight + "px";
         }
 
-        addEventListener("resize", function() {
+        window.addEventListener("resize", function() {
           resize();
         });
 

@@ -114,14 +114,14 @@ const config = {
       title: "UV Examples",
       template: "./src/index.html",
       minify: false,
-      inject: "head",
+      inject: false,
     }),
     new HtmlWebpackPlugin({
       title: "UV Examples",
       template: "./src/uv.html",
       filename: "uv.html",
       minify: false,
-      inject: "head",
+      inject: false,
     }),
     new webpack.ProvidePlugin({
       $: "jquery",
